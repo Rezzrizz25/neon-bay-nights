@@ -1,79 +1,60 @@
-// The screenshot scenes behind ?shot=start|play|end. Each one plays the real rules forward from a
-// fresh world for a fixed number of steps, steered by a simple autopilot (look ahead each way the
-// paddle could move, keep clear of blocks, chase the lowest coin when that is safe), so the frame
-// is what a short game really looks like and the same seed always gives the same frame.
-import { FIELD, PLAYER, STEP } from './config.js';
-import { EVENT_OVER, KIND_BLOCK } from './world.js';
-import { SCREEN_OVER, SCREEN_PLAY, SCREEN_TITLE } from './render.js';
+// Deterministic screenshot staging for ?shot=start|drive|chase|mission&seed=N.
+// Each scene sets up a real game state (title, dusk driving, police chase,
+// mission in progress) and main.js then plays it forward a few seconds with an
+// autopilot, so the frame is what real play looks like — same seed, same frame.
+import { startMission } from './missions.js';
 
-const START_SECONDS = 5;
-const PLAY_SECONDS = 26;
-const END_LIMIT_SECONDS = 600;
-/**
- * How far ahead, in seconds, the autopilot checks each way it could move: the play scene's pilot
- * looks well ahead and keeps all its lives; the end scene's looks only a moment ahead, so it is
- * caught out once the blocks speed up, as a hurried player is.
- */
-const HORIZON_PLAY = 0.7;
-const HORIZON_END = 0.25;
-const SAMPLE = 1 / 30;
-const DIRECTIONS = [0, -1, 1];
-/** Extra room, each side, it keeps between the paddle and a block. */
-const MARGIN = 10;
-
-/** Seconds until moving in `direction` (-1, 0, 1) runs the paddle into a block; Infinity when it never does. */
-function timeToHit(state, direction, horizon) {
-  const player = state.player;
-  for (let t = SAMPLE; t <= horizon; t += SAMPLE) {
-    const x = Math.min(FIELD.width - player.width, Math.max(0, player.x + direction * PLAYER.speed * t));
-    for (let index = 0; index < state.items.length; index += 1) {
-      const item = state.items[index];
-      if (!item.active || item.kind !== KIND_BLOCK) continue;
-      const y = item.y + item.speed * t;
-      if (y + item.height > player.y && y < player.y + player.height && item.x < x + player.width + MARGIN && item.x + item.width > x - MARGIN) return t;
-    }
-  }
-  return Infinity;
-}
-
-/** Of the safe ways to move, the one toward the lowest coin (or the centre); else the one that is hit last. */
-function autopilot(state, horizon) {
-  const player = state.player;
-  let coin = null;
-  for (let index = 0; index < state.items.length; index += 1) {
-    const item = state.items[index];
-    if (item.active && item.kind !== KIND_BLOCK && (coin === null || item.y > coin.y)) coin = item;
-  }
-  const target = coin === null ? FIELD.width / 2 : coin.x + coin.width / 2;
-  const centre = player.x + player.width / 2;
-  const wanted = target > centre + 8 ? 1 : target < centre - 8 ? -1 : 0;
-  let best = wanted;
-  let bestTime = timeToHit(state, wanted, horizon);
-  for (let index = 0; index < DIRECTIONS.length && bestTime !== Infinity; index += 1) {
-    const time = timeToHit(state, DIRECTIONS[index], horizon);
-    if (time > bestTime) {
-      bestTime = time;
-      best = DIRECTIONS[index];
-    }
-  }
-  return best;
-}
-
-/**
- * Set `world` to the named scene (start, play or end; any other name is start) and return the
- * screen to draw over it and the best score to show.
- */
-export function stageShot(name, world) {
+export function applyShotSetup(name, state, world) {
   world.reset();
-  if (name !== 'play' && name !== 'end') {
-    for (let index = 0; index < START_SECONDS / STEP; index += 1) world.step(STEP, 0, true);
-    return { screen: SCREEN_TITLE, best: 0 };
+  const p = state.player;
+  if (name === 'start') {
+    state.time = 18.2; // dusk over the city, title panel on top
+    return { screen: 'title', seconds: 3, drive: false };
   }
-  const limit = name === 'end' ? END_LIMIT_SECONDS : PLAY_SECONDS;
-  const horizon = name === 'end' ? HORIZON_END : HORIZON_PLAY;
-  for (let index = 0; index < limit / STEP; index += 1) {
-    if (world.step(STEP, autopilot(world.state, horizon), false) & EVENT_OVER) break;
+  if (name === 'drive') {
+    state.time = 18.4;
+    const car = state.cars.find((c) => c.parked) || state.cars[0];
+    p.car = car; p.onFoot = false; car.parked = false; car.ai = false;
+    car.x = 600; car.y = 1200 - 14; car.angle = 0; car.speed = 260;
+    p.x = car.x; p.y = car.y; p.angle = 0;
+    return { screen: 'play', seconds: 5, drive: true };
   }
-  const over = world.state.lives === 0;
-  return { screen: over ? SCREEN_OVER : SCREEN_PLAY, best: world.state.score };
+  if (name === 'chase') {
+    state.time = 19.5; // night chase, headlights and wanted stars
+    const car = state.cars.find((c) => c.parked) || state.cars[0];
+    p.car = car; p.onFoot = false; car.parked = false; car.ai = false;
+    car.x = 1400; car.y = 1200 - 14; car.angle = 0; car.speed = 380;
+    p.x = car.x; p.y = car.y; p.angle = 0;
+    state.wanted = 3;
+    state.heat = 90;
+    state.weapon = 'pistol';
+    state.ammo = 18;
+    return { screen: 'play', seconds: 4, drive: true };
+  }
+  // mission: Bay Runner timed delivery, objective marker + minimap visible.
+  state.time = 10.5; // bright morning for a readable mission shot
+  startMission(state, 1);
+  const car = state.cars.find((c) => c.parked) || state.cars[0];
+  p.car = car; p.onFoot = false; car.parked = false; car.ai = false;
+  car.x = 900; car.y = 1200 - 14; car.angle = 0; car.speed = 300;
+  p.x = car.x; p.y = car.y; p.angle = 0;
+  state.weapon = 'pistol';
+  state.ammo = 12;
+  return { screen: 'play', seconds: 3, drive: true };
+}
+
+/** Autopilot keys for the staged drive: hold W, steer gently toward the road. */
+export function autopilotKeys(state) {
+  const car = state.player.car;
+  const keys = { up: true, down: false, left: false, right: false, brake: false };
+  if (!car) return keys;
+  const laneY = Math.round(car.y / 400) * 400 - 14;
+  const targetAngle = car.angle;
+  const dy = laneY - car.y;
+  if (Math.abs(dy) > 6) {
+    const want = Math.atan2(dy, 200);
+    if (want > targetAngle + 0.05) keys.left = false, keys.right = true;
+    else if (want < targetAngle - 0.05) keys.left = true, keys.right = false;
+  }
+  return keys;
 }

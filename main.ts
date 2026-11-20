@@ -12,6 +12,9 @@
 // Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
 
+// Neon Bay Nights (built in this session): an original open-world crime game in
+// Solmar Bay — city driving, traffic, police wanted levels, 5 story missions,
+// combat, HUD + minimap, WebAudio synth sound, saves. See game/src/ and README.md.
 import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
